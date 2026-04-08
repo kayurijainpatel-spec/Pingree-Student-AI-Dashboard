@@ -363,7 +363,7 @@
 <header>
   <div class="header-title">
     <h1>Pingree School · <em>AI Landscape</em> Survey</h1>
-    <p>Student survey responses &nbsp;·&nbsp; Last Updated: April 5, 2026 &nbsp;·&nbsp; 10 questions, 106 respondents</p>
+    <p>Student survey responses &nbsp;·&nbsp; Last Updated: April 5, 2026 by Kayuri Patel &nbsp;·&nbsp; 10 questions, 106 respondents</p>
   </div>
   <div class="header-stats">
     <div class="stat-pill"><div class="n" id="hd-n">106</div><span class="label">Responses</span></div>
@@ -624,6 +624,7 @@
         </div>
         <div class="chart-type-btns">
           <button class="ct-btn active" onclick="setChartType('q7','stackedBar',this)">Stacked</button>
+          <button class="ct-btn" onclick="setChartType('q7','pctBar',this)">% Segmented</button>
           <button class="ct-btn" onclick="setChartType('q7','groupedBar',this)">Grouped</button>
         </div>
         <button class="edit-toggle-btn" onclick="toggleEdit('q7')">⚙ Edit</button>
@@ -753,10 +754,11 @@
       <div class="card-head">
         <div class="card-head-info">
           <div class="card-title">Q8 · Teacher Approach by Grade Level</div>
-          <div class="card-subtitle">Stacked by grade for each approach category</div>
+          <div class="card-subtitle">% of each grade rating their teachers' approach as Appropriate, Overly Restrictive, or Too Loose</div>
         </div>
         <div class="chart-type-btns">
-          <button class="ct-btn active" onclick="setChartType('teacher2','stackedBar',this)">Stacked</button>
+          <button class="ct-btn active" onclick="setChartType('teacher2','pctBar',this)">% Segmented</button>
+          <button class="ct-btn" onclick="setChartType('teacher2','stackedBar',this)">Count Stacked</button>
           <button class="ct-btn" onclick="setChartType('teacher2','groupedBar',this)">Grouped</button>
         </div>
       </div>
@@ -806,6 +808,7 @@
         </div>
         <div class="chart-type-btns">
           <button class="ct-btn active" onclick="setChartType('concerns2','stackedBar',this)">Stacked</button>
+          <button class="ct-btn" onclick="setChartType('concerns2','pctBar',this)">% Segmented</button>
           <button class="ct-btn" onclick="setChartType('concerns2','groupedBar',this)">Grouped</button>
         </div>
       </div>
@@ -931,11 +934,23 @@ function avg(arr, fn) {
   return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
 }
 
-const PALETTE = ['#c84b31','#2563a8','#1a7a4a','#d4a017','#8b5cf6','#e07b39','#0891b2','#be123c','#047857','#7c3aed'];
-const ACCEPT_COLORS = { 'Acceptable':'#1a7a4a', 'Depends':'#d4a017', 'Not Acceptable':'#c84b31' };
-const CONCERN_COLORS = ['#1','#2','#3','#4','#5'].map((_,i) => `hsl(${200 + i*30}, 65%, ${55-i*5}%)`);
+// Primary palette — always used in this order: primary, secondary, tertiary, etc.
+// If a chart has 3 colors, it uses P[0], P[1], P[2] — always the same three.
+const P = ['#c84b31','#2563a8','#1a7a4a','#d4a017','#8b5cf6','#0891b2','#be185d','#65a30d'];
+const PALETTE = P; // alias for multi-select charts
+
+// Acceptability uses fixed semantic colors (green=ok, yellow=depends, red=not ok)
+const ACCEPT_COLORS = { 'Acceptable': P[2], 'Depends': P[3], 'Not Acceptable': P[0] };
+
+// Likert scale: low concern (green) → high concern (red), drawn from palette ends
+const LIKERT_COLORS = [P[2], '#5a9e6a', P[3], '#e07b39', P[0]];
+
+// Grades always map to positions 0–3 in the palette
 const GRADE_ORDER = ['9th','10th','11th','12th'];
-const GRADE_COLORS = { '9th':'#c84b31','10th':'#2563a8','11th':'#1a7a4a','12th':'#d4a017' };
+const GRADE_COLORS = { '9th': P[0], '10th': P[1], '11th': P[2], '12th': P[3] };
+
+// Teacher approach: Appropriate=green, Overly restrictive=red, Too loose=gold
+const TEACHER_COLORS = { 'Appropriate': P[2], 'Overly restrictive': P[0], 'Too loose': P[3] };
 
 // ═══════════════════════════════════════════════════════════════
 // CHART REGISTRY
@@ -1036,7 +1051,7 @@ function renderChart_grade(data) {
     });
   } else {
     const opts = commonOptions('','Grade','Responses');
-    buildChart('grade', { type:'bar', data:{ labels, datasets:[makeBarDataset(labels, counts, colors)] }, options:opts });
+    buildChart('grade', { type:'bar', data:{ labels, datasets:[{data:vals, backgroundColor:colors, borderRadius:5, borderSkipped:false}] }, options:opts });
   }
 }
 
@@ -1047,7 +1062,7 @@ function renderChart_freq(data) {
   const shortLabels = ['Daily','Weekly','Monthly','Rarely/Never'];
   const counts = countMap(data, r => r.freq);
   const vals = labels.map(l => counts[l]||0);
-  const colors = ['#c84b31','#e07b39','#d4a017','#8b8b9a'];
+  const colors = [P[0], P[1], P[2], P[3]];
   if (['pie','doughnut','polarArea'].includes(t)) {
     buildChart('freq', {
       type: t === 'polarArea' ? 'polarArea' : t,
@@ -1146,23 +1161,31 @@ function renderChart_q7(data) {
     return (el && el.value.trim()) ? el.value.trim() : d;
   });
   const cats = ['Acceptable','Depends','Not Acceptable'];
-  const datasets = cats.map(cat => ({
+  const rawCounts = fields.map(f => cats.map(cat => data.filter(r => r[f] === cat).length));
+  const totals = rawCounts.map(row => row.reduce((a,b)=>a+b,0));
+
+  const isPct = t === 'pctBar';
+  const isStacked = t !== 'groupedBar';
+  const datasets = cats.map((cat, ci) => ({
     label: cat,
-    data: fields.map(f => data.filter(r => r[f] === cat).length),
+    data: fields.map((f, fi) => {
+      const count = data.filter(r => r[f] === cat).length;
+      return isPct ? (totals[fi] ? Math.round(count/totals[fi]*100) : 0) : count;
+    }),
     backgroundColor: ACCEPT_COLORS[cat],
     borderColor: 'white',
     borderWidth: 1,
-    borderRadius: t === 'groupedBar' ? 4 : 0,
+    borderRadius: (!isStacked && !isPct) ? 4 : 0,
     borderSkipped: false,
   }));
-  const isStacked = t !== 'groupedBar';
   const opts = {
     responsive:true, maintainAspectRatio:false,
     plugins:{ legend:{display:true, position:'bottom', labels:{font:{size:11},padding:12,boxWidth:14}},
-      tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.parsed.y} students`}} },
+      tooltip:{callbacks:{label:c=>isPct ? ` ${c.dataset.label}: ${c.parsed.y}%` : ` ${c.dataset.label}: ${c.parsed.y} students`}} },
     scales:{
-      x:{ stacked:isStacked, grid:{display:false}, ticks:{font:{size:10}} },
-      y:{ stacked:isStacked, grid:{color:'#f0ede8'}, ticks:{font:{size:10}}, max: isStacked ? undefined : Math.max(...fields.map((_,fi)=>Math.max(...cats.map(c=>data.filter(r=>r[fields[fi]]===c).length))))+5 }
+      x:{ stacked: isStacked||isPct, grid:{display:false}, ticks:{font:{size:10}} },
+      y:{ stacked: isStacked||isPct, grid:{color:'#f0ede8'}, ticks:{font:{size:10}, callback: v => isPct ? v+'%' : v},
+          max: isPct ? 100 : undefined }
     }
   };
   buildChart('q7', { type:'bar', data:{labels:customLabels, datasets}, options:opts });
@@ -1190,7 +1213,7 @@ function renderChart_teacher(data) {
   const labels = ['Appropriate','Overly restrictive','Too loose'];
   const counts = countMap(data, r => r.teacher_approach);
   const vals = labels.map(l => counts[l]||0);
-  const colors = ['#1a7a4a','#c84b31','#d4a017'];
+  const colors = labels.map(l => TEACHER_COLORS[l]);
   if (['pie','doughnut','polarArea'].includes(t)) {
     buildChart('teacher', { type: t==='polarArea'?'polarArea':t, data:{labels, datasets:[{data:vals, backgroundColor:colors, borderWidth:2, borderColor:'white'}]},
       options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:true,position:'bottom',labels:{font:{size:11},padding:10,boxWidth:14}}}} });
@@ -1202,26 +1225,55 @@ function renderChart_teacher(data) {
 
 // --- TEACHER BY GRADE ---
 function renderChart_teacher2(data) {
-  const t = chartTypes['teacher2'] || 'stackedBar';
-  const isStacked = t !== 'groupedBar';
+  const t = chartTypes['teacher2'] || 'pctBar';
   const approachLabels = ['Appropriate','Overly restrictive','Too loose'];
-  const datasets = GRADE_ORDER.map(g => ({
-    label: g,
-    data: approachLabels.map(a => data.filter(r => r.grade===g && r.teacher_approach===a).length),
-    backgroundColor: GRADE_COLORS[g],
-    borderRadius: isStacked ? 0 : 4,
-    borderSkipped: false,
-    borderWidth: 1, borderColor:'white'
-  }));
-  const opts = {
-    responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{display:true,position:'bottom',labels:{font:{size:11},padding:10,boxWidth:14}} },
-    scales:{
-      x:{ stacked:isStacked, grid:{display:false}, ticks:{font:{size:11}} },
-      y:{ stacked:isStacked, grid:{color:'#f0ede8'}, ticks:{font:{size:10}} }
-    }
-  };
-  buildChart('teacher2', { type:'bar', data:{labels:approachLabels, datasets}, options:opts });
+  const approachColors = approachLabels.map(a => TEACHER_COLORS[a]);
+
+  if (t === 'pctBar') {
+    // x = grade, y = % of that grade, stacked 100%, colored by approach
+    const datasets = approachLabels.map((a, ai) => ({
+      label: a,
+      data: GRADE_ORDER.map(g => {
+        const gradeRows = data.filter(r => r.grade === g);
+        if (!gradeRows.length) return 0;
+        return Math.round(gradeRows.filter(r => r.teacher_approach === a).length / gradeRows.length * 100);
+      }),
+      backgroundColor: approachColors[ai],
+      borderWidth: 1, borderColor: 'white',
+      borderRadius: 0, borderSkipped: false
+    }));
+    const opts = {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { font:{size:11}, padding:10, boxWidth:14 } },
+        tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${c.parsed.y}%` } }
+      },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { font:{size:11} } },
+        y: { stacked: true, grid: { color:'#f0ede8' }, ticks: { font:{size:10}, callback: v => v+'%' }, max: 100 }
+      }
+    };
+    buildChart('teacher2', { type:'bar', data:{ labels: GRADE_ORDER, datasets }, options: opts });
+  } else {
+    const isStacked = t !== 'groupedBar';
+    const datasets = GRADE_ORDER.map(g => ({
+      label: g,
+      data: approachLabels.map(a => data.filter(r => r.grade===g && r.teacher_approach===a).length),
+      backgroundColor: GRADE_COLORS[g],
+      borderRadius: isStacked ? 0 : 4,
+      borderSkipped: false,
+      borderWidth: 1, borderColor:'white'
+    }));
+    const opts = {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:true,position:'bottom',labels:{font:{size:11},padding:10,boxWidth:14}} },
+      scales:{
+        x:{ stacked:isStacked, grid:{display:false}, ticks:{font:{size:11}} },
+        y:{ stacked:isStacked, grid:{color:'#f0ede8'}, ticks:{font:{size:10}} }
+      }
+    };
+    buildChart('teacher2', { type:'bar', data:{labels:approachLabels, datasets}, options:opts });
+  }
 }
 
 // --- CONCERNS AVG ---
@@ -1246,35 +1298,35 @@ function renderChart_concerns(data) {
         y:{ grid:{display:isH}, ticks:{font:{size:10}}, beginAtZero:!isH, max:isH?undefined:maxVal }
       }
     };
-    buildChart('concerns', { type:'bar', data:{labels, datasets:[{data:avgs, backgroundColor:labels.map((_,i)=>`hsl(${200+i*25},60%,45%)`), borderRadius:5, borderSkipped:false}]}, options:opts });
+    buildChart('concerns', { type:'bar', data:{labels, datasets:[{data:avgs, backgroundColor:labels.map((_,i)=>P[i%P.length]), borderRadius:5, borderSkipped:false}]}, options:opts });
   }
 }
 
 // --- CONCERNS DISTRIBUTION ---
 function renderChart_concerns2(data) {
   const t = chartTypes['concerns2'] || 'stackedBar';
+  const isPct = t === 'pctBar';
   const isStacked = t !== 'groupedBar';
   const fields = ['concern_privacy','concern_skills','concern_bias','concern_cheat','concern_depend'];
   const shortLabels = ['Privacy','Skills','Bias','Cheating','Dependence'];
-  const ratingLabels = ['1 (not concerned)','2','3','4','5 (very concerned)'];
-  const ratingShort = ['1','2','3','4','5'];
-  const ratingColors = ['#1a7a4a','#5a9e6a','#d4a017','#e07b39','#c84b31'];
-  const datasets = ratingLabels.map((r,ri) => ({
-    label: `${ri+1}`,
-    data: fields.map(f => data.filter(row => {
-      const s = parseScore(row[f]);
-      return s === ri+1;
-    }).length),
+  const ratingColors = LIKERT_COLORS;
+  const rawCounts = fields.map(f => [1,2,3,4,5].map(ri => data.filter(row => parseScore(row[f]) === ri).length));
+  const totals = rawCounts.map(row => row.reduce((a,b)=>a+b,0));
+  const datasets = [1,2,3,4,5].map((rating, ri) => ({
+    label: `${rating}`,
+    data: fields.map((f, fi) => isPct ? (totals[fi] ? Math.round(rawCounts[fi][ri]/totals[fi]*100) : 0) : rawCounts[fi][ri]),
     backgroundColor: ratingColors[ri],
     borderWidth:1, borderColor:'white',
-    borderRadius: isStacked?0:3, borderSkipped:false
+    borderRadius: (!isStacked && !isPct) ? 3 : 0, borderSkipped:false
   }));
   const opts = {
     responsive:true, maintainAspectRatio:false,
-    plugins:{ legend:{display:true, position:'bottom', title:{display:true, text:'Rating (1=low, 5=high)', font:{size:10}}, labels:{font:{size:10},padding:8,boxWidth:12}} },
+    plugins:{ legend:{display:true, position:'bottom', title:{display:true, text:'Rating (1=low concern, 5=high)', font:{size:10}}, labels:{font:{size:10},padding:8,boxWidth:12}},
+      tooltip:{callbacks:{label:c=>isPct ? ` Rating ${c.dataset.label}: ${c.parsed.y}%` : ` Rating ${c.dataset.label}: ${c.parsed.y} students`}} },
     scales:{
-      x:{ stacked:isStacked, grid:{display:false}, ticks:{font:{size:10}} },
-      y:{ stacked:isStacked, grid:{color:'#f0ede8'}, ticks:{font:{size:10}} }
+      x:{ stacked:isStacked||isPct, grid:{display:false}, ticks:{font:{size:10}} },
+      y:{ stacked:isStacked||isPct, grid:{color:'#f0ede8'}, ticks:{font:{size:10}, callback: v => isPct ? v+'%' : v},
+          max: isPct ? 100 : undefined }
     }
   };
   buildChart('concerns2', { type:'bar', data:{labels:shortLabels, datasets}, options:opts });
